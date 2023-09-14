@@ -1,5 +1,4 @@
-slack_token: "YOUR_SLACK_CHANNEL_ID"
-slack_channel: "YOUR_SLACK_CHANNEL_ID"
+slack_url: "https://YOUR_SLACK_WEBHOOK_URL.com"
 insecure: false
 timeout_seconds: 10
 verbose: false
