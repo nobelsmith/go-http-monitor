@@ -2,12 +2,9 @@ package main
 
 import (
 	"crypto/tls"
-	"encoding/json"
 	"flag"
 	"fmt"
-	_ "fmt"
 	"io"
-
 	"log"
 	"net"
 	"net/http"
@@ -28,75 +25,59 @@ const (
 	DebugColor   = "\033[0;36m%s\033[0m"
 )
 
-// Config has been created
-type Config struct {
-	Insecure       bool `yaml:"insecure"`
-	TimeoutRequest int  `yaml:"timeout_seconds"`
-	Verbose        bool `yaml: "insecure"`
-	Checks         []struct {
-		URL          string  `yaml:"url"`
-		StatusCode   *int    `yaml:"status_code"`
-		Match        *string `yaml:"match"`
-		ResponseTime *int    `yaml:"response_time"`
-		TCP          string  `yaml:"tcp"`
-		Port         *int    `yaml:"port"`
-	} `yaml:"checks"`
-}
+var Cfg = Config{}
 
-// Config has been created
-type CheckOutput struct {
-	Resource string `json:"resource"`
-	Status   string `json:"available"`
-	Elapsed  string `json:"elapsed"`
-}
-
-type JsonOutput struct {
-	Results []CheckOutput `json:"checks"`
-}
-
-func addEntry(results []CheckOutput, url string, active bool, elapsed time.Duration) []CheckOutput {
+func addEntry(results []CheckOutput, url string, active bool, elapsed time.Duration, err error) []CheckOutput {
 	check := &CheckOutput{
 		Resource: url,
 		Status:   strconv.FormatBool(!active),
 		Elapsed:  elapsed.String(),
+		Error:    err.Error(),
 	}
 	results = append(results, *check)
 	return results
 }
 
 func main() {
-
+	// File flag setup and parse
 	filenamePtr := flag.String("file", "monitor.yml", "Monitoring file")
 	flag.Parse()
 
-	hostUnreachable := false
+	// Open file for reading. Close when main closes
 	file, err := os.Open(*filenamePtr)
 	if err != nil {
 		log.Fatal(err)
 	}
 	defer file.Close()
+
+	// Read file into data
 	data, err := io.ReadAll(file)
-
-	y := Config{}
-
-	err = yaml.Unmarshal([]byte(data), &y)
 	if err != nil {
 		log.Fatalf("error: %v", err)
 	}
 
-	results := &JsonOutput{}
-
-	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: y.Insecure}
-	client := http.Client{
-		Timeout: time.Duration(y.TimeoutRequest) * time.Second,
+	// Unmarshal data into config struct
+	err = yaml.Unmarshal([]byte(data), &Cfg)
+	if err != nil {
+		log.Fatalf("error: %v", err)
 	}
 
-	for index, plugin := range y.Checks {
-		_ = index
+	hostUnreachable := false
+	// Make new results struct
+	results := &JsonOutput{}
+
+	// Make new http client
+	http.DefaultTransport.(*http.Transport).TLSClientConfig = &tls.Config{InsecureSkipVerify: Cfg.Insecure}
+	client := http.Client{
+		Timeout: time.Duration(Cfg.TimeoutRequest) * time.Second,
+	}
+
+	for _, plugin := range Cfg.Checks {
 		tmpString := ""
 
 		start := time.Now()
 
+		// Send Get Request to specified url
 		if strings.Contains(plugin.URL, "http") {
 			resp, err := client.Get(plugin.URL)
 			elapsed := time.Since(start)
@@ -107,14 +88,24 @@ func main() {
 				fmt.Printf(ErrorColor, tmpString)
 				hostUnreachable = true
 
-				results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed)
+				results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed, err)
 				continue
 			}
 
+			// Read content from response body
 			content, err := io.ReadAll(resp.Body)
-			if y.Verbose {
+			if err != nil {
+				tmpString = "[NOK] " + plugin.URL + "\n"
+				fmt.Printf(ErrorColor, tmpString)
+				hostUnreachable = true
+
+				results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed, err)
+				continue
+			}
+
+			// If Verbose log response body content
+			if Cfg.Verbose {
 				tmpString = "URL : " + plugin.URL + "\n"
-				// tmpString += "Status Code : " + string(resp.StatusCode) + "\n"
 				tmpString += "Body : " + string(content)
 				fmt.Println(tmpString)
 			}
@@ -125,7 +116,7 @@ func main() {
 				fmt.Printf(ErrorColor, tmpString)
 				hostUnreachable = true
 
-				results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed)
+				results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed, err)
 				continue
 			}
 
@@ -135,7 +126,7 @@ func main() {
 				fmt.Printf(ErrorColor, tmpString)
 				hostUnreachable = true
 
-				results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed)
+				results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed, err)
 				continue
 			}
 
@@ -148,26 +139,22 @@ func main() {
 					fmt.Printf(ErrorColor, tmpString)
 					hostUnreachable = true
 
-					results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed)
+					results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed, err)
 					continue
 				}
 			}
 
-			tmpString = "[OK] " + plugin.URL + "\n"
-			fmt.Printf(NoticeColor, tmpString)
-			results.Results = addEntry(results.Results, plugin.URL, true, elapsed)
 		} else if plugin.TCP != "" {
 			servAddr := plugin.TCP + ":" + strconv.Itoa(*plugin.Port)
-			tcpAddr, err := net.ResolveTCPAddr("tcp", servAddr)
-			conn, err := net.DialTCP("tcp", nil, tcpAddr)
-			_ = conn
-			// fmt.Println("Foobar?")
+			tcpAddr, _ := net.ResolveTCPAddr("tcp", servAddr)
+			_, err := net.DialTCP("tcp", nil, tcpAddr)
+
 			elapsed := time.Since(start)
 			if err != nil { // error on tcp connect
 				hostUnreachable = true
 				tmpString = "[NOK] TCP:" + servAddr + "\n"
 				fmt.Printf(ErrorColor, tmpString)
-				results.Results = addEntry(results.Results, servAddr, hostUnreachable, elapsed)
+				results.Results = addEntry(results.Results, servAddr, hostUnreachable, elapsed, err)
 				continue
 			} else if plugin.ResponseTime != nil { // error on connection
 				responseTimeDuration := time.Duration(*plugin.ResponseTime) * time.Millisecond
@@ -176,22 +163,12 @@ func main() {
 					tmpString = "[NOK] TCP:" + servAddr + ", Elapsed time: " + elapsed.String() + " instead of " + responseTime + "\n"
 					fmt.Printf(ErrorColor, tmpString)
 					hostUnreachable = true
-					results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed)
+					results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed, err)
 					continue
 				}
 			}
-			tmpString = "[OK] TCP:" + servAddr + "\n"
-			fmt.Printf(NoticeColor, tmpString)
-			results.Results = addEntry(results.Results, servAddr, true, elapsed)
 		}
 	}
 
-	jsonFile, _ := json.MarshalIndent(results, "", " ")
-	_ = os.WriteFile("output.json", jsonFile, 0644)
-
-	// if any host is unreachable, exit(1) to fail execution
-	if hostUnreachable {
-		os.Exit(1)
-	}
-	os.Exit(0)
+	PostSlack(results)
 }
