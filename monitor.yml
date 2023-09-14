@@ -1,3 +1,5 @@
+slack_token: "YOUR_SLACK_CHANNEL_ID"
+slack_channel: "YOUR_SLACK_CHANNEL_ID"
 insecure: false
 timeout_seconds: 10
 verbose: false
