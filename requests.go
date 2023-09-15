@@ -25,7 +25,6 @@ func BuildJson(checks *JsonOutput) SlackMessage {
 func PostSlack(checks *JsonOutput) {
 	slackmessage := BuildJson(checks)
 	finalJson, err := json.MarshalIndent(slackmessage, "", " ")
-	fmt.Printf("Final JSON: %+v\n", string(finalJson))
 	if err != nil {
 		fmt.Print("Error Marshalling JSON")
 	}
@@ -42,7 +41,4 @@ func PostSlack(checks *JsonOutput) {
 		panic(err)
 	}
 	defer resp.Body.Close()
-
-	fmt.Println("response Status:", resp.Status)
-	fmt.Println("response Headers:", resp.Header)
 }

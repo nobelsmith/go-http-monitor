@@ -91,6 +91,7 @@ func main() {
 				results.Results = addEntry(results.Results, plugin.URL, hostUnreachable, elapsed, err)
 				continue
 			}
+			defer resp.Body.Close()
 
 			// Read content from response body
 			content, err := io.ReadAll(resp.Body)
@@ -143,7 +144,8 @@ func main() {
 					continue
 				}
 			}
-
+			tmpString = "[OK] " + plugin.URL + "\n"
+			fmt.Printf(InfoColor, tmpString)
 		} else if plugin.TCP != "" {
 			servAddr := plugin.TCP + ":" + strconv.Itoa(*plugin.Port)
 			tcpAddr, _ := net.ResolveTCPAddr("tcp", servAddr)
@@ -170,5 +172,8 @@ func main() {
 		}
 	}
 
-	PostSlack(results)
+	if len(results.Results) >= 1 {
+		PostSlack(results)
+	}
+
 }
